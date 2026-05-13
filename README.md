@@ -6,6 +6,9 @@ JSON-RPC over TLS to manage virtual machines on a hypervisor.
 [![COPR build status](https://copr.fedorainfracloud.org/coprs/boeroboy/vdsm-rs/package/vdsm-rs/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/boeroboy/vdsm-rs/)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE)
 
+<img width="3483" height="2143" alt="vdsm-rs" src="https://github.com/user-attachments/assets/1c3a15b8-d916-4e40-9966-b5404209a90e" />
+
+
 ## Quick start
 
 ```fish
