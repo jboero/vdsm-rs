@@ -13,10 +13,16 @@ use vdsm_rpc::JsonRpcError;
 
 use crate::sysinfo;
 
-/// Software version we *claim* to engine. Upstream vdsm uses 4.50.X to
-/// mirror ovirt-engine 4.5.X — we match the engine's own release exactly
-/// (engine 4.5.7 → vdsm 4.50.7) so the host registers as "the right age"
-/// for the cluster compatibility checks.
+/// Software version we *claim* to engine via getCapabilities.software_version.
+/// Distinct from the RPM Version on purpose:
+///   - RPM Version is `4.5.7` (matches `ovirt-engine-4.5.7` so admins running
+///     `rpm -q vdsm-rs` see version-matched packages on their hosts).
+///   - This wire version is `4.50.7` because engine compares the string
+///     against a minimum-vdsm floor (~"4.40") using RPM version-compare
+///     rules — `"4.5.7" < "4.40.0"` element-wise (5 < 40), so reporting
+///     `4.5.7` here would fire VDS_VERSION_TOO_OLD. Upstream Python vdsm
+///     uses the same `4.50.x for engine 4.5.x` convention for exactly this
+///     reason; we follow suit for compatibility with the existing engine.
 const CLAIMED_VDSM_VERSION: &str = "4.50.7";
 const VDSM_RS_VERSION: &str = env!("CARGO_PKG_VERSION");
 
