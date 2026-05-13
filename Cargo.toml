@@ -15,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "4.50.7"
 edition = "2021"
 rust-version = "1.80"
 license = "GPL-2.0-or-later"
@@ -38,15 +38,15 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 rustls-pemfile = "2"
 
 # Workspace-internal crates
-vdsm-common = { path = "crates/vdsm-common", version = "0.1.0" }
-vdsm-schema = { path = "crates/vdsm-schema", version = "0.1.0" }
-vdsm-rpc = { path = "crates/vdsm-rpc", version = "0.1.0" }
-vdsm-virt = { path = "crates/vdsm-virt", version = "0.1.0" }
-vdsm-host = { path = "crates/vdsm-host", version = "0.1.0" }
-vdsm-storage = { path = "crates/vdsm-storage", version = "0.1.0" }
-vdsm-network = { path = "crates/vdsm-network", version = "0.1.0" }
-vdsm-tool = { path = "crates/vdsm-tool", version = "0.1.0" }
-vdsm-client = { path = "crates/vdsm-client", version = "0.1.0" }
+vdsm-common = { path = "crates/vdsm-common", version = "4.50.7" }
+vdsm-schema = { path = "crates/vdsm-schema", version = "4.50.7" }
+vdsm-rpc = { path = "crates/vdsm-rpc", version = "4.50.7" }
+vdsm-virt = { path = "crates/vdsm-virt", version = "4.50.7" }
+vdsm-host = { path = "crates/vdsm-host", version = "4.50.7" }
+vdsm-storage = { path = "crates/vdsm-storage", version = "4.50.7" }
+vdsm-network = { path = "crates/vdsm-network", version = "4.50.7" }
+vdsm-tool = { path = "crates/vdsm-tool", version = "4.50.7" }
+vdsm-client = { path = "crates/vdsm-client", version = "4.50.7" }
 
 [profile.release]
 lto = "thin"

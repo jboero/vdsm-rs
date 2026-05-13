@@ -10,8 +10,8 @@ Name:           vdsm-rs
 # i.e. Epoch:0) regardless of how low our %{version} is. Anyone with
 # `Requires: vdsm >= 4.x` is satisfied by `Provides: vdsm = 1:%{version}`.
 Epoch:          1
-Version:        0.1.0
-Release:        50%{?dist}
+Version:        4.50.7
+Release:        1%{?dist}
 Summary:        Rust rewrite of oVirt's VDSM host daemon
 
 License:        GPL-2.0-or-later
