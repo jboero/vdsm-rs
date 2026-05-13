@@ -1,0 +1,10 @@
+# vdsm-rs stub — host-deploy expects this service to start; real impl
+# not present (vdsm-rs v0 drops OVS/OVN). Always succeeds.
+[Unit]
+Description=ovn-controller (vdsm-rs stub)
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+[Install]
+WantedBy=multi-user.target

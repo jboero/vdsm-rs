@@ -1,0 +1,25 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# RPM build artifacts
+/rpmbuild/
+/*.tar
+/*.tar.gz
+/*.rpm
+/*.src.rpm
+
+# Editor / OS noise
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# Generated
+/crates/*/target/
+
+# SELinux policy build artifacts (out of `make -C packaging/selinux`)
+/packaging/selinux/tmp/
+/packaging/selinux/*.pp
+/packaging/selinux/*.pp.bz2
+PROMPT.md

@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/vdsm-common",
+    "crates/vdsm-schema",
+    "crates/vdsm-rpc",
+    "crates/vdsm-virt",
+    "crates/vdsm-host",
+    "crates/vdsm-storage",
+    "crates/vdsm-network",
+    "crates/vdsmd",
+    "crates/supervdsm",
+    "crates/vdsm-tool",
+    "crates/vdsm-client",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "GPL-2.0-or-later"
+authors = ["vdsm-rs contributors"]
+homepage = "https://ovirt.org"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+anyhow = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+# TLS stack: rustls + ring (boring crypto provider, no aws-lc dep churn).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rustls-pemfile = "2"
+
+# Workspace-internal crates
+vdsm-common = { path = "crates/vdsm-common", version = "0.1.0" }
+vdsm-schema = { path = "crates/vdsm-schema", version = "0.1.0" }
+vdsm-rpc = { path = "crates/vdsm-rpc", version = "0.1.0" }
+vdsm-virt = { path = "crates/vdsm-virt", version = "0.1.0" }
+vdsm-host = { path = "crates/vdsm-host", version = "0.1.0" }
+vdsm-storage = { path = "crates/vdsm-storage", version = "0.1.0" }
+vdsm-network = { path = "crates/vdsm-network", version = "0.1.0" }
+vdsm-tool = { path = "crates/vdsm-tool", version = "0.1.0" }
+vdsm-client = { path = "crates/vdsm-client", version = "0.1.0" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+debug = false

@@ -1,0 +1,37 @@
+[Unit]
+Description=Virtual Desktop Server Manager (Rust rewrite)
+Documentation=https://ovirt.org
+Requires=libvirtd.service
+After=libvirtd.service supervdsmd.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vdsm
+Group=vdsm
+# DMI serial fields (product_serial / chassis_serial / board_serial) are
+# mode 0400 in /sys/class/dmi/id — only root can read them. Copy what we
+# need into /run/vdsm/ as root (the `+` prefix grants this ExecStartPre
+# elevated privileges even though Service.User=vdsm), then vdsmd reads
+# from there as the vdsm user.
+ExecStartPre=+/bin/sh -c 'for f in product_serial chassis_serial board_serial; do \
+    [ -r /sys/class/dmi/id/$f ] && cp /sys/class/dmi/id/$f /run/vdsm/$f 2>/dev/null; \
+done; chmod 0444 /run/vdsm/product_serial /run/vdsm/chassis_serial /run/vdsm/board_serial 2>/dev/null; true'
+ExecStart=/usr/bin/vdsmd
+Environment=SSLKEYLOGFILE=/var/log/vdsm/sslkeys.log
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+RuntimeDirectory=vdsm
+StateDirectory=vdsm
+LogsDirectory=vdsm
+
+# Hardening — adjust as we wire real subsystems.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/vdsm /var/log/vdsm /run/vdsm
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,38 @@
+## <summary>vdsm-rs host daemon SELinux policy.</summary>
+
+########################################
+## <summary>
+##  Execute vdsmd in the vdsmd domain.
+## </summary>
+## <param name="domain">
+##  <summary>
+##   Domain allowed to transition.
+##  </summary>
+## </param>
+#
+interface(`vdsmd_domtrans',`
+    gen_require(`
+        type vdsmd_t, vdsmd_exec_t;
+    ')
+    corecmd_search_bin($1)
+    domtrans_pattern($1, vdsmd_exec_t, vdsmd_t)
+')
+
+########################################
+## <summary>
+##  Read vdsm-rs configuration files.
+## </summary>
+## <param name="domain">
+##  <summary>
+##   Domain allowed access.
+##  </summary>
+## </param>
+#
+interface(`vdsmd_read_config',`
+    gen_require(`
+        type vdsmd_conf_t;
+    ')
+    files_search_etc($1)
+    read_files_pattern($1, vdsmd_conf_t, vdsmd_conf_t)
+    list_dirs_pattern($1, vdsmd_conf_t, vdsmd_conf_t)
+')

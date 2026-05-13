@@ -1,0 +1,25 @@
+[package]
+name = "vdsm-schema"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+description = "Codegen of typed Rust bindings from oVirt's vdsm-api.yml schema."
+build = "build.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+# We use yaml-rust2's low-level parser-events API (not the high-level
+# YamlLoader) so we can implement last-wins on duplicate mapping keys —
+# matching the PyYAML semantics the upstream schema is implicitly
+# written against. We also pre-process anchor/alias syntax textually;
+# see build.rs for both.
+yaml-rust2 = "0.11"
+
+[lib]
+path = "src/lib.rs"

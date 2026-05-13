@@ -1,0 +1,16 @@
+# Daemon executables. /usr/sbin and /usr/bin are the same path on
+# usrmerge'd Fedora; we list both so EL10 / older derivatives are covered.
+/usr/bin/vdsmd                  --      gen_context(system_u:object_r:vdsmd_exec_t,s0)
+/usr/sbin/vdsmd                 --      gen_context(system_u:object_r:vdsmd_exec_t,s0)
+/usr/bin/supervdsmd             --      gen_context(system_u:object_r:vdsmd_exec_t,s0)
+/usr/sbin/supervdsmd            --      gen_context(system_u:object_r:vdsmd_exec_t,s0)
+
+# Config (no base-policy rule for /etc/vdsm).
+/etc/vdsm(/.*)?                         gen_context(system_u:object_r:vdsmd_conf_t,s0)
+
+# /etc/pki/vdsm intentionally inherits cert_t from base policy.
+#
+# /var/lib/vdsm, /var/log/vdsm, and /run/vdsm intentionally inherit
+# virt_content_t / virt_log_t / virt_var_run_t respectively from base
+# policy — re-declaring them here would conflict at semodule install
+# time. The .te grants vdsmd_t management rights on those types.

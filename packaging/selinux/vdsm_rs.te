@@ -1,0 +1,166 @@
+policy_module(vdsm_rs, 0.1.6)
+
+########################################
+#
+# Type declarations
+#
+
+# Daemon process domain + executable label.
+type vdsmd_t;
+type vdsmd_exec_t;
+init_daemon_domain(vdsmd_t, vdsmd_exec_t)
+
+# /etc/vdsm/* — daemon configuration. (Base policy has no rule for this
+# path, so re-declaring is safe.)
+type vdsmd_conf_t;
+files_config_file(vdsmd_conf_t)
+
+# Port type for the JSON-RPC listener. We declare our own rather than
+# reuse `vdsm_port_t` from base policy — it isn't present in every
+# Fedora / EL release. The %post selinux scriptlet labels port 54321
+# with this type via `semanage port -a`.
+type vdsmd_port_t;
+corenet_port(vdsmd_port_t)
+
+# We deliberately do NOT declare types for
+#   /var/lib/vdsm   -> virt_content_t
+#   /var/log/vdsm   -> virt_log_t
+#   /run/vdsm       -> virt_var_run_t
+# Fedora's base selinux-policy already labels those paths and re-declaring
+# the same regex at our priority causes "Problems processing filecon rules"
+# during semodule install. Sharing the virt types is also semantically
+# correct — libvirt will read/write some of these once we wire it in.
+require {
+    type virt_content_t;
+    type virt_log_t;
+    type virt_var_run_t;
+    type virsh_exec_t;
+    type ifconfig_exec_t;
+    type virtd_t;
+    type cert_t;
+    type init_t;
+    class capability { setpcap };
+    class process { setcap };
+    class process2 { nnp_transition nosuid_transition };
+    class unix_stream_socket { connectto };
+}
+
+########################################
+#
+# vdsmd local policy
+#
+
+# Capabilities the daemon currently uses. Kept minimal:
+#   net_bind_service — bind TCP :54321 (vdsmd_port_t)
+#   dac_read_search  — traverse engine-pushed PKI dir trees with
+#                      varying ownership during transitions
+#   sys_resource     — bump RLIMIT_NOFILE to LimitNOFILE=65536 in the unit
+allow vdsmd_t self:capability { net_bind_service dac_read_search sys_resource };
+
+# Sockets.
+allow vdsmd_t self:fifo_file rw_fifo_file_perms;
+allow vdsmd_t self:tcp_socket create_stream_socket_perms;
+allow vdsmd_t self:unix_stream_socket create_stream_socket_perms;
+allow vdsmd_t self:netlink_route_socket r_netlink_socket_perms;
+
+# Network: bind/send/recv on vdsmd_port_t (label applied to TCP 54321
+# by %post selinux via semanage).
+allow vdsmd_t vdsmd_port_t:tcp_socket name_bind;
+corenet_tcp_bind_generic_node(vdsmd_t)
+corenet_tcp_sendrecv_generic_node(vdsmd_t)
+corenet_tcp_sendrecv_all_ports(vdsmd_t)
+
+# Configuration (read-only).
+read_files_pattern(vdsmd_t, vdsmd_conf_t, vdsmd_conf_t)
+list_dirs_pattern(vdsmd_t, vdsmd_conf_t, vdsmd_conf_t)
+
+# PKI: /etc/pki/vdsm/* inherits cert_t from base policy's /etc/pki rule.
+read_files_pattern(vdsmd_t, cert_t, cert_t)
+list_dirs_pattern(vdsmd_t, cert_t, cert_t)
+miscfiles_read_generic_certs(vdsmd_t)
+
+# Persistent state under /var/lib/vdsm (virt_content_t).
+manage_dirs_pattern(vdsmd_t, virt_content_t, virt_content_t)
+manage_files_pattern(vdsmd_t, virt_content_t, virt_content_t)
+files_var_lib_filetrans(vdsmd_t, virt_content_t, { dir file })
+
+# Log files under /var/log/vdsm (virt_log_t).
+manage_dirs_pattern(vdsmd_t, virt_log_t, virt_log_t)
+append_files_pattern(vdsmd_t, virt_log_t, virt_log_t)
+create_files_pattern(vdsmd_t, virt_log_t, virt_log_t)
+logging_log_filetrans(vdsmd_t, virt_log_t, { file dir })
+
+# Runtime dir under /run/vdsm (virt_var_run_t).
+manage_dirs_pattern(vdsmd_t, virt_var_run_t, virt_var_run_t)
+manage_files_pattern(vdsmd_t, virt_var_run_t, virt_var_run_t)
+manage_sock_files_pattern(vdsmd_t, virt_var_run_t, virt_var_run_t)
+files_pid_filetrans(vdsmd_t, virt_var_run_t, { dir file sock_file })
+
+# Read /proc, /sys for Host.getCapabilities / getStats.
+kernel_read_system_state(vdsmd_t)
+kernel_read_kernel_sysctls(vdsmd_t)
+kernel_read_proc_symlinks(vdsmd_t)
+dev_read_sysfs(vdsmd_t)
+dev_read_urand(vdsmd_t)
+
+# Hostname / DNS resolution.
+sysnet_read_config(vdsmd_t)
+
+# Walk /sys/fs/cgroup. Tokio's runtime probes its own cgroup to size
+# the worker pool; tracing-subscriber's journald layer does similar.
+# Without this, every cold start logs an AVC (non-fatal but noisy).
+fs_search_cgroup_dirs(vdsmd_t)
+fs_getattr_cgroup(vdsmd_t)
+fs_list_cgroup_dirs(vdsmd_t)
+fs_read_cgroup_files(vdsmd_t)
+
+# Logging via journald / syslog.
+logging_send_syslog_msg(vdsmd_t)
+
+# Allow systemd to manage us cleanly.
+init_dontaudit_use_fds(vdsmd_t)
+
+# vdsm-virt shells out to /usr/bin/virsh (qemu:///system) for the VM
+# lifecycle verbs (VM.create, VM.destroy, Host.dumpxmls,
+# reconcile_from_libvirt). Without `execute` on virsh_exec_t, every
+# getAllVmStats poll silently returns an empty array under enforcing.
+# execute_no_trans keeps virsh in vdsmd_t (no virsh_t needed).
+allow vdsmd_t virsh_exec_t:file { read getattr open execute execute_no_trans map };
+
+# sysinfo::iface_ipv4 / default_gateway exec `/usr/sbin/ip` to populate
+# ovirtmgmt.{addr,ipv4addrs,gateway,netmask} for caps. ifconfig_exec_t is
+# the standard label for /usr/sbin/ip on Fedora; without exec the mgmt
+# network reports empty and engine emits VDS_INSTALL_FAILED.
+allow vdsmd_t ifconfig_exec_t:file { read getattr open execute execute_no_trans map };
+
+# virsh (forked from vdsmd) needs to connect to libvirtd's unix socket
+# at /run/libvirt/libvirt-sock (labeled virtd_t). Without this, virsh
+# falls back to polkit prompts via pkttyagent (more AVCs) and eventually
+# fails. Granting this directly avoids the polkit fallback entirely.
+allow vdsmd_t virtd_t:unix_stream_socket connectto;
+
+# `ip` calls capset(2) on itself during network ops; that needs
+# both the CAP_SETPCAP capability and the process:setcap perm.
+allow vdsmd_t self:capability { setpcap };
+allow vdsmd_t self:process { setcap };
+
+# Read /sys/fs/selinux/enforce so getCapabilities can report the
+# correct SELinux mode (engine UI shows Disabled/Permissive/Enforcing
+# from this). Without it, vdsm-rs reports Disabled even on enforcing
+# hosts because the read EACCES'es silently (security_t label).
+selinux_get_enforce_mode(vdsmd_t)
+
+# Generic /usr/bin/* exec for vdsmd helpers (getenforce, and virsh's
+# pkttyagent polkit probe which we dontaudit'd before). We need exec on
+# bin_t for `getenforce` to report SELinux mode in caps; granting it more
+# broadly is the pragmatic call since vdsmd already shells out for many
+# administrative reads. Stays no_trans to keep helpers in vdsmd_t.
+require { type bin_t; }
+allow vdsmd_t bin_t:file { read getattr open execute execute_no_trans map };
+
+# Our systemd unit sets NoNewPrivileges=true (and PrivateTmp=true, which
+# remounts /tmp nosuid). Both block the init_t -> vdsmd_t domain
+# transition under default policy because SELinux refuses to "lift"
+# privileges across NNP / nosuid boundaries. Granting the transition
+# perms keeps the unit hardening AND the confined domain.
+allow init_t vdsmd_t:process2 { nnp_transition nosuid_transition };

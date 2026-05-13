@@ -1,0 +1,16 @@
+[package]
+name = "vdsm-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+description = "Storage subsystem for vdsm-rs: NFS file-based storage domains for v0."
+
+[dependencies]
+vdsm-common = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }

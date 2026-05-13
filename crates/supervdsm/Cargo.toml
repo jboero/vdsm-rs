@@ -1,0 +1,19 @@
+[package]
+name = "supervdsm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+description = "vdsm-rs privileged helper (the only root component)."
+
+[[bin]]
+name = "supervdsmd"
+path = "src/main.rs"
+
+[dependencies]
+vdsm-common = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }

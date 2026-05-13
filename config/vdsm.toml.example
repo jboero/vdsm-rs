@@ -1,0 +1,24 @@
+# vdsm-rs configuration. Install at /etc/vdsm/vdsm.toml.
+# All sections are optional; missing values fall back to defaults.
+
+[daemon]
+user      = "vdsm"
+group     = "vdsm"
+state_dir = "/var/lib/vdsm"
+log_level = "info"
+
+[rpc]
+bind        = "0.0.0.0"
+port        = 54321
+# Set false for local dev (plain TCP, no certs). Production = true.
+tls_enabled = true
+tls_cert    = "/etc/pki/vdsm/certs/vdsmcert.pem"
+tls_key     = "/etc/pki/vdsm/keys/vdsmkey.pem"
+tls_ca      = "/etc/pki/vdsm/certs/cacert.pem"
+# "line"  = newline-delimited JSON-RPC. Easy to test with openssl s_client.
+# "stomp" = STOMP 1.2 framing. What real ovirt-engine speaks. Use this
+#           once you point an engine at the host.
+framing     = "line"
+
+[libvirt]
+uri = "qemu:///system"

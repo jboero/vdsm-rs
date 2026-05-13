@@ -1,0 +1,20 @@
+[package]
+name = "vdsm-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+description = "Thin JSON-RPC CLI for vdsm-rs (host-deploy / hosted-engine compat)."
+
+[[bin]]
+name = "vdsm-client"
+path = "src/main.rs"
+
+[dependencies]
+vdsm-common = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

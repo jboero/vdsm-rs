@@ -1,0 +1,15 @@
+[Unit]
+Description=VDSM privileged helper (Rust rewrite)
+Documentation=https://ovirt.org
+Before=vdsmd.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/supervdsmd
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=supervdsm
+
+[Install]
+WantedBy=multi-user.target

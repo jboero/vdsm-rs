@@ -1,0 +1,35 @@
+# systemd-sysusers config for vdsm-rs.
+# See sysusers.d(5).
+#
+#Type Name  ID  GECOS                  Home dir         Shell
+# UID 36 matches upstream Python vdsm so /etc/pki/vdsm files installed by
+# an older vdsm aren't ownership-mismatched after migration. Also keeps the
+# vdsm user out of /etc/login.defs UID_MIN (1000+) range, so display managers
+# (SDDM, GDM) don't list it as a possible interactive login.
+u     vdsm  36   "vdsm-rs daemon user"  /var/lib/vdsm    /sbin/nologin
+
+# Real VDSM runs as user `vdsm` member of group `kvm` so it can read the
+# libvirt sockets and manipulate /dev/kvm. ovirt-engine pushes certs to
+# /etc/pki/vdsm/keys/ as `vdsm:kvm 0440`; without this membership, the
+# daemon can't read its own private key.
+m     vdsm  kvm
+
+# vdsm-virt shells out to virsh against qemu:///system, which requires
+# membership in the `libvirt` group (or polkit grant). Without this,
+# every VM.* verb fails authentication before reaching the hypervisor.
+m     vdsm  libvirt
+
+# ovirt-engine's host-deploy ansible role (ovirt-host-deploy-ovn-certificates)
+# chowns /etc/pki/vdsm/ovn/{cacert,cert,key}.pem to `openvswitch:openvswitch`
+# unconditionally — even on hosts where we drop OVN entirely. We don't run
+# OVS/OVN in vdsm-rs v0, but the user+group must exist for the chown to
+# succeed, otherwise the deploy aborts before reaching the JSON-RPC handshake.
+# Auto-assign from the system UID range. Belt-and-suspenders: even if
+# sysusers ends up with UID >= UID_MIN (we've seen it happen when the
+# system range is fragmented), the shipped /etc/sddm.conf.d/00-vdsm-rs.conf
+# hides this user from display managers.
+u     openvswitch  -   "Open vSwitch (compat stub for ovirt host-deploy)"  /run/openvswitch  /sbin/nologin
+
+# ovirt-vmconsole-host-deploy expects this user to exist. The role does
+# `getent passwd ovirt-vmconsole` and aborts if missing.
+u     ovirt-vmconsole  -   "Serial console proxy (vdsm-rs compat stub)"  /var/lib/ovirt-vmconsole  /sbin/nologin
