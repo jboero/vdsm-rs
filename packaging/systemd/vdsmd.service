@@ -27,11 +27,23 @@ StateDirectory=vdsm
 LogsDirectory=vdsm
 
 # Hardening — adjust as we wire real subsystems.
-NoNewPrivileges=true
+# NoNewPrivileges intentionally OFF for now: vdsmd shells out to
+# `sudo mount` (sudoers-gated to /usr/bin/mount + umount only) for
+# NFS mounts during connectStorageServer. Real upstream vdsm uses
+# supervdsmd over a unix socket for privileged ops; once we ship
+# that, this can flip back on.
+#NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/vdsm /var/log/vdsm /run/vdsm
+# Mount namespace propagation: PrivateTmp=true sets up a private mount
+# namespace whose mounts default to slave propagation — meaning NFS
+# mounts made by `sudo mount` inside the unit don't reach the host
+# namespace, and vanish when the unit restarts. `shared` makes mount
+# events propagate both directions, so NFS exports stay mounted across
+# vdsmd restarts.
+MountFlags=shared
+ReadWritePaths=/var/lib/vdsm /var/log/vdsm /run/vdsm /rhev/data-center/mnt
 
 [Install]
 WantedBy=multi-user.target

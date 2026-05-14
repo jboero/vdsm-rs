@@ -58,4 +58,8 @@ pub fn registry() -> &'static RwLock<HashMap<String, VmRecord>> {
     REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-pub use verbs::{dump_xmls, vm_cont, vm_create, vm_destroy, vm_get_stats, vm_pause, vm_shutdown};
+pub use verbs::{
+    dump_xmls, vm_cont, vm_create, vm_destroy, vm_get_stats, vm_migrate,
+    vm_migrate_change_params, vm_migrate_status, vm_migration_cancel,
+    vm_migration_create, vm_pause, vm_set_ticket, vm_shutdown, vm_update_device,
+};

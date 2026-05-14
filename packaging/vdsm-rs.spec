@@ -6,10 +6,12 @@
 %global selinuxtype       targeted
 
 Name:           vdsm-rs
-# Epoch:1 lets us outrank real upstream vdsm (which ships with no Epoch,
-# i.e. Epoch:0) regardless of how low our %{version} is. Anyone with
-# `Requires: vdsm >= 4.x` is satisfied by `Provides: vdsm = 1:%{version}`.
-Epoch:          1
+# Epoch:2 — bumped from 1 alongside the storage v1 release (NFS SD attach
+# + activate, VM disk creation, VNC console, shutdown watchdog, live
+# migration verbs, iSCSI/FC/LVM block-SD support). The bump is mostly
+# defensive: it guarantees clean precedence over any locally cached older
+# build during the COPR rollout, regardless of dnf's cache state.
+Epoch:          2
 Version:        4.5.7
 Release:        1%{?dist}
 Summary:        Rust rewrite of oVirt's VDSM host daemon
@@ -19,6 +21,8 @@ URL:            https://ovirt.org
 # Tarball top-level directory is `vdsm-rs/` to match the unpack rule below.
 Source0:        %{name}.tar
 Source1:        %{name}.sysusers
+Source2:        %{name}.sudoers
+Source3:        %{name}.tmpfiles
 
 # Pull the selinux subpackage onto every install by default. Users on
 # SELinux-disabled hosts can `dnf install vdsm-rs --setopt=install_weak_deps=False`.
@@ -194,6 +198,13 @@ install -D -m 0640 config/vdsm.toml.example \
     %{buildroot}%{_sysconfdir}/vdsm/vdsm.toml
 install -D -m 0644 %{SOURCE1} \
     %{buildroot}%{_sysusersdir}/%{name}.conf
+# Sudoers fragment: vdsm needs root for a small set of storage commands.
+install -D -m 0440 %{SOURCE2} \
+    %{buildroot}%{_sysconfdir}/sudoers.d/vdsm-rs
+# tmpfiles.d fragment: creates /rhev/data-center/mnt at boot so the NFS
+# mount path exists before vdsmd's ProtectSystem=strict takes effect.
+install -D -m 0644 %{SOURCE3} \
+    %{buildroot}%{_tmpfilesdir}/vdsm-rs.conf
 
 # SDDM / display-manager drop-in: hide the daemon users from the login
 # screen. Needed because sysusers may land vdsm / openvswitch in the
@@ -291,6 +302,8 @@ fi
 %{_unitdir}/vdsmd.service
 %{_sysusersdir}/%{name}.conf
 %config(noreplace) %{_sysconfdir}/sddm.conf.d/00-vdsm-rs.conf
+%attr(0440, root, root) %config(noreplace) %{_sysconfdir}/sudoers.d/vdsm-rs
+%{_tmpfilesdir}/vdsm-rs.conf
 # /etc/vdsm + vdsm.toml owned root:vdsm so the daemon (running as user
 # `vdsm`) can read its own config. We deliberately keep root as the
 # owner (the daemon shouldn't rewrite its own config) and grant read
@@ -323,6 +336,41 @@ fi
 %{_datadir}/selinux/devel/include/distributed/%{selinux_modname}.if
 
 %changelog
-* Thu Apr 30 2026 vdsm-rs contributors <vdsm-rs@ovirt.org> - 0.1.0-1
+* Thu May 14 2026 John Boero <boeroboy@gmail.com> - 2:4.5.7-1
+- Storage v1: full NFS SD attach + activate, Data Center initialises,
+  SPM elects on this host.
+- VM disk creation via Volume.create (qcow2/raw + oVirt-shape .meta /
+  .lease sidecars) and Image.prepare returning the absolute path so
+  libvirt domain XML can reference the volume.
+- VM lifecycle gains a 30 s ACPI-shutdown watchdog that force-destroys
+  headless SeaBIOS VMs stuck in "Powering down".
+- VNC console via VM.setTicket — engine password applied through the
+  QEMU monitor (set_password / expire_password). SPICE remains dead.
+- Live-migration verbs (VM.migrate, migrationCreate, migrationCancel,
+  migrateStatus) shell out to `virsh migrate --live --persistent
+  --undefinesource --auto-converge qemu+tls://dst/system`. Untested
+  until a second host joins a cluster.
+- iSCSI / FC / LVM block-SD support end-to-end. SD detection picks
+  between file backend (NFS / POSIX / CIFS mountpoint) and block
+  backend (LVM VG named after the SD UUID). Volume.create runs
+  lvcreate; Image.prepare / teardown run lvchange -ay / -an and return
+  /dev/<vg>/<vol> for libvirt. vgs-derived disktotal / diskfree.
+- iSCSI discover / login / logout / rescan, lsblk -J -o TRAN for FC vs
+  iSCSI distinction, multipath -ll -j inventory, sysfs FC rescan via
+  fcScan.
+- Ship /etc/sudoers.d/vdsm-rs for the small set of privileged storage
+  commands (iscsiadm, multipath, pv/vg/lv create/change/remove, tee).
+- CIFS / POSIX file SDs mount through the same dispatcher as NFS,
+  keyed on the engine's domainType.
+- vdsmd.service: MountFlags=shared so NFS mounts inside the unit's
+  mount namespace propagate to the host and survive vdsmd restarts.
+- StorageDomain.getStats: fix `df -PB1 --output=...` flag conflict
+  that had silently caused diskfree to report 0 for all file SDs.
+- Engine wire compatibility: StoragePool.connect (short alias),
+  populated dominfo, RFC-822-numeric dateTime, packages2 dict for
+  package versions, etc.
+- Bumped Epoch from 1 to 2 alongside this release. See spec comment.
+
+* Thu Apr 30 2026 vdsm-rs contributors <vdsm-rs@ovirt.org> - 1:0.1.0-1
 - Initial vdsm-rs scaffold: cargo workspace, vdsm-schema codegen from
   vendored vdsm-api.yml, vdsmd / supervdsmd binary stubs, systemd units.

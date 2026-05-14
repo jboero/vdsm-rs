@@ -858,8 +858,10 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "tracing",
  "vdsm-common",
+ "vdsm-rpc",
 ]
 
 [[package]]

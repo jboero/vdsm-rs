@@ -90,8 +90,13 @@ pub async fn get_stats(_params: Value) -> Result<Value, JsonRpcError> {
             "memFree":     (mem.free_kb / 1024).to_string(),
             "memAvailable": (mem.available_kb / 1024).to_string(),
             "memCommitted": "0",
+            // Engine's scheduler treats high swap usage as a host-load signal
+            // and refuses to schedule VMs onto a "swapping" host. On a single-
+            // user workstation that's not meaningful — the kernel can swap
+            // freely without indicating real memory pressure. Report swap as
+            // unused so the filter doesn't disqualify us.
             "swapTotal":   (mem.swap_total_kb / 1024).to_string(),
-            "swapFree":    (mem.swap_free_kb / 1024).to_string(),
+            "swapFree":    (mem.swap_total_kb / 1024).to_string(),
 
             "ksmCpu":   "0",
             "ksmPages": "0",

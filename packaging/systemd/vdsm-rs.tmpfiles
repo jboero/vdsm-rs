@@ -1,0 +1,13 @@
+# systemd-tmpfiles config for vdsm-rs.
+#
+# /rhev/data-center/mnt/ is where NFS storage domains get mounted by the
+# connectStorageServer path. ProtectSystem=strict in vdsmd.service makes
+# the rest of / read-only, and ReadWritePaths= can only widen access to
+# directories that already exist — hence creating the tree here, at
+# tmpfiles processing time (well before vdsmd starts).
+#
+# Owned by vdsm:kvm so the daemon can mkdir the per-export subdirs.
+
+d /rhev                        0755 vdsm kvm -
+d /rhev/data-center            0755 vdsm kvm -
+d /rhev/data-center/mnt        0755 vdsm kvm -

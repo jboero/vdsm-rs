@@ -39,7 +39,39 @@ the original test target was a SolidRun HoneyComb LX2K.
   hugepages, SELinux mode, package versions, etc.
 - Host monitoring polls cleanly: `Host.ping2`, `getCapabilities`, `getStats`,
   `getAllVmStats`, `getHardwareInfo`, `dumpxmls`, etc.
-- VM lifecycle (`VM.create` / `VM.destroy` / `VM.getStats`) via libvirt.
+- **NFS storage end-to-end** — connectStorageServer → mount → StoragePool.create
+  → StoragePool.connect → activateStorageDomain → SD status **Active**. Data
+  Center initializes; the SPM elects on this host.
+- **VM disk creation** via `Volume.create` (qemu-img qcow2/raw, oVirt-shape
+  `.meta` + `.lease` sidecars) and `Image.prepare` (returns absolute path so
+  libvirt domain XML can reference the volume).
+- VM lifecycle (`VM.create` / `VM.destroy` / `VM.shutdown` / `VM.pause` /
+  `VM.cont` / `VM.getStats`) via libvirt, with a 30s ACPI-shutdown watchdog
+  that force-destroys headless SeaBIOS VMs stuck in *Powering down*.
+- **VNC console** via `VM.setTicket` — engine-issued password applied through
+  QEMU monitor (`set_password vnc <pw>` + `expire_password`). SPICE is dead
+  upstream; vdsm-rs emits VNC graphics in the libvirt XML.
+- **Live migration verbs** implemented — `VM.migrate`, `migrationCreate`,
+  `migrationCancel`, `migrateStatus` shell out to `virsh migrate --live
+  --persistent --undefinesource --auto-converge qemu+tls://dst/system`.
+  Untested until a second host joins the cluster.
+- **CIFS / POSIX file SDs** mount through the same dispatcher as NFS, keyed
+  on the engine's `domainType` — full SD activate path should work
+  (unverified).
+- **iSCSI / FC / LVM block SDs** end-to-end. SD detection picks between file
+  backend (NFS/POSIX/CIFS mountpoint) and block backend (LVM VG whose name
+  equals the SD UUID) via [`sd_backend::sd_backend`][1]. `Volume.create`
+  dispatches: file SDs get `qemu-img create` on the mounted path, block SDs
+  get `lvcreate -L <bytes>B <vg>/<vol_id>`. `Image.prepare`/`teardown`
+  `lvchange -ay`/`-an` and return `/dev/<vg>/<vol>` to libvirt. `vgs`-derived
+  `disktotal/diskfree` for block SDs. iSCSI discover/login/logout/rescan,
+  `lsblk -J -o TRAN` for FC vs iSCSI distinction, `multipath -ll -j` for
+  multipath inventory, sysfs FC rescan via `fcScan`. The privileged commands
+  (iscsiadm, pv/vg/lvcreate, lvchange, etc.) ship in
+  [`packaging/vdsm-rs.sudoers`][2] — installed to `/etc/sudoers.d/vdsm-rs`.
+
+  [1]: crates/vdsm-storage/src/sd_backend.rs
+  [2]: packaging/vdsm-rs.sudoers
 - External VM ingestion — engine auto-discovers libvirt VMs running on the
   host and imports them as `external-*` managed entities.
 - **SELinux enforcing** clean: zero AVCs in steady state, custom policy
@@ -47,12 +79,16 @@ the original test target was a SolidRun HoneyComb LX2K.
 
 **Out of scope for v0**
 
-- Block / FC / iSCSI storage subsystem
 - Hosted-engine deployment
 - GlusterFS storage domains
-- OVS / OVN networking
-- Live migration between hosts
-- Sanlock-backed locking
+- OVS / OVN networking (read-only discovery only)
+- Sanlock-backed distributed locking (single-SPM file leases are stubbed)
+- Real sanlock distributed locking (the SD `dom_md/{ids,leases}` files
+  are zero-filled stubs — fine for single-host PoC, not safe for
+  multi-host SPM contention)
+- Block-SD setups have only been verified at the unit-test / dialog-probe
+  level; no end-to-end run of "iSCSI target → VG → SD → VM disk → boot"
+  has been driven through the engine UI yet on real hardware
 
 These can be added incrementally; the current focus is making a Fedora node
 work as a *compute* member of an existing cluster.
@@ -112,7 +148,7 @@ crates/
 ├── vdsm-rpc/      JSON-RPC over STOMP over TLS (tokio + rustls)
 ├── vdsm-host/     Host capabilities, stats, hardware inventory
 ├── vdsm-virt/     libvirt wrapper, VM lifecycle (virsh shell-out for v0)
-├── vdsm-storage/  NFS-only file SD (placeholder)
+├── vdsm-storage/  File SDs (NFS/POSIX/CIFS) end-to-end; iSCSI/FC/LVM verbs
 ├── vdsm-network/  Read-only network discovery
 ├── vdsm-schema/   Codegen from upstream VDSM YAML schema
 ├── vdsm-common/   Shared types, logging, config

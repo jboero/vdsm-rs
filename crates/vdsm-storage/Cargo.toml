@@ -10,6 +10,8 @@ description = "Storage subsystem for vdsm-rs: NFS file-based storage domains for
 
 [dependencies]
 vdsm-common = { workspace = true }
+vdsm-rpc = { workspace = true }
+tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
