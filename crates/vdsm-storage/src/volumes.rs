@@ -26,7 +26,7 @@ use tracing::{info, warn};
 
 use vdsm_rpc::JsonRpcError;
 
-use crate::sd_backend::{sd_backend, sudo, SdBackend};
+use crate::sd_backend::{run, sd_backend, PrivOp, SdBackend};
 
 const ZERO_UUID: &str = "00000000-0000-0000-0000-000000000000";
 
@@ -155,14 +155,12 @@ async fn create_block_volume(
     // — qcow2 metadata fits easily).
     let extent_bytes: u64 = 128 * 1024 * 1024;
     let rounded = size_bytes.div_ceil(extent_bytes) * extent_bytes;
-    let size_arg = format!("{rounded}B");
 
     let lv_path = format!("{vg}/{vol_id}");
 
-    // lvcreate -W y (force wipe of any prior signatures) -n <vol_id> -L <size>B <vg>
-    if sudo("/usr/sbin/lvcreate",
-        &["-W", "y", "-Z", "n", "-n", vol_id, "-L", &size_arg, vg]
-    ).await.is_none() {
+    if run(PrivOp::Lvcreate {
+        vg: vg.to_string(), lv: vol_id.to_string(), size_bytes: rounded,
+    }).await.is_none() {
         return Err(JsonRpcError::internal(format!("lvcreate failed for {lv_path}")));
     }
 
@@ -178,7 +176,9 @@ async fn create_block_volume(
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr).to_string();
             // Roll back the LV so we don't leak orphan storage.
-            let _ = sudo("/usr/sbin/lvremove", &["-f", "-y", &lv_path]).await;
+            let _ = run(PrivOp::Lvremove {
+                vg: vg.to_string(), lv: vol_id.to_string(),
+            }).await;
             return Err(JsonRpcError::internal(format!("qemu-img create qcow2-on-LV: {err}")));
         }
     }
@@ -277,8 +277,9 @@ pub async fn volume_delete(params: Value) -> Result<Value, JsonRpcError> {
             let _ = tokio::fs::remove_file(img_dir.join(format!("{vol_id}.lease"))).await;
         }
         Some(SdBackend::Block { vg_name, state_dir }) => {
-            let _ = sudo("/usr/sbin/lvremove",
-                &["-f", "-y", &format!("{vg_name}/{vol_id}")]).await;
+            let _ = run(PrivOp::Lvremove {
+                vg: vg_name, lv: vol_id.clone(),
+            }).await;
             let meta = state_dir.join("images").join(&img_id).join(format!("{vol_id}.meta"));
             let _ = tokio::fs::remove_file(meta).await;
         }
@@ -306,12 +307,14 @@ pub async fn image_prepare(params: Value) -> Result<Value, JsonRpcError> {
             Ok(json!({"path": vol_path.display().to_string()}))
         }
         Some(SdBackend::Block { vg_name, .. }) => {
-            let lv = format!("{vg_name}/{vol_id}");
             // Activate the LV — engine may have left it inactive on a
             // previous teardown. Failing here is fatal: libvirt can't open
             // an inactive LV.
-            if sudo("/usr/sbin/lvchange", &["-a", "y", "-K", &lv]).await.is_none() {
-                return Err(JsonRpcError::internal(format!("lvchange -ay {lv}")));
+            if run(PrivOp::Lvchange {
+                vg: vg_name.clone(), lv: vol_id.clone(), active: true,
+            }).await.is_none() {
+                return Err(JsonRpcError::internal(
+                    format!("lvchange -ay {vg_name}/{vol_id}")));
             }
             let dev = format!("/dev/{vg_name}/{vol_id}");
             if !PathBuf::from(&dev).exists() {
@@ -328,8 +331,9 @@ pub async fn image_teardown(params: Value) -> Result<Value, JsonRpcError> {
     let sd_id = params.get("storagedomainID").and_then(Value::as_str).unwrap_or("").to_string();
     if let Some(SdBackend::Block { vg_name, .. }) = sd_backend(&sd_id).await {
         if !vol_id.is_empty() {
-            let _ = sudo("/usr/sbin/lvchange",
-                &["-a", "n", &format!("{vg_name}/{vol_id}")]).await;
+            let _ = run(PrivOp::Lvchange {
+                vg: vg_name.clone(), lv: vol_id.clone(), active: false,
+            }).await;
         }
     }
     Ok(json!({}))
@@ -350,8 +354,9 @@ pub async fn image_delete(params: Value) -> Result<Value, JsonRpcError> {
                 while let Ok(Some(ent)) = rd.next_entry().await {
                     let name = ent.file_name().to_string_lossy().to_string();
                     if let Some(vol) = name.strip_suffix(".meta") {
-                        let _ = sudo("/usr/sbin/lvremove",
-                            &["-f", "-y", &format!("{vg_name}/{vol}")]).await;
+                        let _ = run(PrivOp::Lvremove {
+                            vg: vg_name.clone(), lv: vol.to_string(),
+                        }).await;
                     }
                 }
             }

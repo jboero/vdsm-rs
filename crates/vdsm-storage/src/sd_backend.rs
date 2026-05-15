@@ -68,21 +68,9 @@ pub async fn vg_exists(name: &str) -> bool {
     }
 }
 
-/// `sudo -n <bin> <args>...` — Some(stdout) on success, None on any
-/// failure (missing tool, missing sudoers rule, non-zero exit).
-pub async fn sudo(bin: &str, args: &[&str]) -> Option<String> {
-    let mut full: Vec<&str> = Vec::with_capacity(args.len() + 2);
-    full.push("-n");
-    full.push(bin);
-    full.extend_from_slice(args);
-    let out = Command::new("/usr/bin/sudo").args(&full).output().await.ok()?;
-    if !out.status.success() {
-        tracing::warn!(
-            bin, exit = ?out.status.code(),
-            stderr = %String::from_utf8_lossy(&out.stderr).trim(),
-            "sudo command failed"
-        );
-        return None;
-    }
-    Some(String::from_utf8_lossy(&out.stdout).to_string())
-}
+// Privileged operations now go through supervdsmd — see
+// [`vdsm_common::supervdsm`]. Read-only LVM *queries* (`vgs`/`lvs`/`pvs`)
+// stay as direct `Command` calls here because they were never privileged
+// (never behind sudo); only mutating/privileged ops cross the supervdsm
+// boundary.
+pub use vdsm_common::supervdsm::{call, run, PrivOp};

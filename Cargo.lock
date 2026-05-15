@@ -569,6 +569,8 @@ version = "4.5.7"
 dependencies = [
  "anyhow",
  "clap",
+ "serde_json",
+ "tokio",
  "tracing",
  "vdsm-common",
 ]
@@ -796,6 +798,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "toml",
  "tracing",
  "tracing-subscriber",

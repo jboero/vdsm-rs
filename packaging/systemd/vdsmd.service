@@ -1,7 +1,7 @@
 [Unit]
 Description=Virtual Desktop Server Manager (Rust rewrite)
 Documentation=https://ovirt.org
-Requires=libvirtd.service
+Requires=libvirtd.service supervdsmd.service
 After=libvirtd.service supervdsmd.service network-online.target
 Wants=network-online.target
 
@@ -26,13 +26,11 @@ RuntimeDirectory=vdsm
 StateDirectory=vdsm
 LogsDirectory=vdsm
 
-# Hardening — adjust as we wire real subsystems.
-# NoNewPrivileges intentionally OFF for now: vdsmd shells out to
-# `sudo mount` (sudoers-gated to /usr/bin/mount + umount only) for
-# NFS mounts during connectStorageServer. Real upstream vdsm uses
-# supervdsmd over a unix socket for privileged ops; once we ship
-# that, this can flip back on.
-#NoNewPrivileges=true
+# Hardening. vdsmd never escalates privileges itself: every privileged
+# storage operation goes to supervdsmd over a Unix socket, so the daemon
+# can run fully locked down. (Pre-supervdsm this had to be OFF because
+# vdsmd shelled out to `sudo mount`; that path is gone.)
+NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true

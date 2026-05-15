@@ -12,10 +12,12 @@ use tracing::{info, warn};
 
 use vdsm_rpc::JsonRpcError;
 
-use crate::sd_backend::sudo;
+use crate::sd_backend::{run, PrivOp};
 
-/// Run a binary; capture stdout. Empty on missing-tool / failure.
-async fn run(bin: &str, args: &[&str]) -> Option<String> {
+/// Run a *read-only* query binary (lsblk/pvs/vgs) as the vdsm user;
+/// capture stdout. None on missing-tool / failure. Privileged/mutating
+/// commands go through [`run`]/[`PrivOp`] to supervdsmd instead.
+async fn query(bin: &str, args: &[&str]) -> Option<String> {
     let out = Command::new(bin).args(args)
         .stdout(Stdio::piped()).stderr(Stdio::piped())
         .output().await.ok()?;
@@ -46,7 +48,7 @@ pub async fn iscsi_discover_send_targets(params: Value) -> Result<Value, JsonRpc
     let port = if spec.port.is_empty() { "3260".to_string() } else { spec.port.clone() };
     let portal = format!("{}:{}", spec.portal, port);
     info!(%portal, "iscsiDiscoverSendTargets");
-    let raw = sudo("/usr/sbin/iscsiadm", &["-m", "discovery", "-t", "st", "-p", &portal])
+    let raw = run(PrivOp::IscsiDiscover { portal: portal.clone() })
         .await.unwrap_or_default();
 
     // Output lines: "<portal>,<tpgt> <iqn>"
@@ -72,8 +74,7 @@ pub async fn iscsi_login(params: Value) -> Result<Value, JsonRpcError> {
     let port = if spec.port.is_empty() { "3260".to_string() } else { spec.port.clone() };
     let portal = format!("{}:{}", spec.portal, port);
     info!(iqn = %spec.iqn, %portal, "iscsiLogin");
-    let _ = sudo("/usr/sbin/iscsiadm",
-        &["-m", "node", "-T", &spec.iqn, "-p", &portal, "--login"]).await;
+    let _ = run(PrivOp::IscsiLogin { iqn: spec.iqn.clone(), portal }).await;
     Ok(json!({}))
 }
 
@@ -85,13 +86,12 @@ pub async fn iscsi_logout(params: Value) -> Result<Value, JsonRpcError> {
     let port = if spec.port.is_empty() { "3260".to_string() } else { spec.port.clone() };
     let portal = format!("{}:{}", spec.portal, port);
     info!(iqn = %spec.iqn, %portal, "iscsiLogout");
-    let _ = sudo("/usr/sbin/iscsiadm",
-        &["-m", "node", "-T", &spec.iqn, "-p", &portal, "--logout"]).await;
+    let _ = run(PrivOp::IscsiLogout { iqn: spec.iqn.clone(), portal }).await;
     Ok(json!({}))
 }
 
 pub async fn iscsi_rescan(_params: Value) -> Result<Value, JsonRpcError> {
-    let _ = sudo("/usr/sbin/iscsiadm", &["-m", "session", "--rescan"]).await;
+    let _ = run(PrivOp::IscsiRescan).await;
     Ok(json!({}))
 }
 
@@ -100,7 +100,7 @@ pub async fn iscsi_rescan(_params: Value) -> Result<Value, JsonRpcError> {
 /// the transport ("iscsi" / "fc" / "sas" / "sata"), so engine sees the
 /// correct devtype rather than every disk labelled iSCSI.
 pub async fn get_device_list(_params: Value) -> Result<Value, JsonRpcError> {
-    let raw = run("/usr/bin/lsblk",
+    let raw = query("/usr/bin/lsblk",
         &["-J", "-b", "-o", "NAME,SIZE,TYPE,WWN,VENDOR,MODEL,SERIAL,FSTYPE,TRAN"])
         .await.unwrap_or_default();
     let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(json!({}));
@@ -143,7 +143,7 @@ pub async fn get_device_list(_params: Value) -> Result<Value, JsonRpcError> {
 /// device is not an LVM PV. We resolve the VG UUID via a second pvs call
 /// because `pvs -o vg_uuid` returns the VG UUID directly.
 async fn pv_membership(dev: &str) -> (String, String) {
-    let Some(raw) = run("/usr/sbin/pvs",
+    let Some(raw) = query("/usr/sbin/pvs",
         &["--noheadings", "-o", "pv_uuid,vg_uuid", dev]).await else {
         return (String::new(), String::new());
     };
@@ -172,7 +172,7 @@ pub async fn get_devices_visibility(params: Value) -> Result<Value, JsonRpcError
 
 /// `Host.getLVMVGList` — list LVM volume groups (potential block-SD VGs).
 pub async fn get_lvm_vg_list(_params: Value) -> Result<Value, JsonRpcError> {
-    let raw = run("/usr/sbin/vgs",
+    let raw = query("/usr/sbin/vgs",
         &["--reportformat", "json", "-o", "vg_uuid,vg_name,vg_size,vg_free,vg_tags"])
         .await.unwrap_or_default();
     let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(json!({}));
@@ -229,14 +229,11 @@ pub async fn create_vg(params: Value) -> Result<Value, JsonRpcError> {
     }
     info!(%name, device_count = devices.len(), "createVG");
     for d in &devices {
-        if sudo("/usr/sbin/pvcreate", &["-ff", "-y", d]).await.is_none() {
+        if run(PrivOp::Pvcreate { device: d.clone() }).await.is_none() {
             return Err(JsonRpcError::internal(format!("pvcreate {d} failed")));
         }
     }
-    let mut args: Vec<String> = vec!["-s".into(), "128m".into(), "-y".into(), name.clone()];
-    args.extend(devices.iter().cloned());
-    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    if sudo("/usr/sbin/vgcreate", &arg_refs).await.is_none() {
+    if run(PrivOp::Vgcreate { vg: name.clone(), devices: devices.clone() }).await.is_none() {
         warn!("vgcreate failed");
         return Err(JsonRpcError::internal("vgcreate failed"));
     }
@@ -256,8 +253,8 @@ pub async fn extend_vg(params: Value) -> Result<Value, JsonRpcError> {
         return Err(JsonRpcError::invalid_params("vg + devlist required"));
     }
     for d in &devices {
-        let _ = sudo("/usr/sbin/pvcreate", &["-ff", "-y", d]).await;
-        let _ = sudo("/usr/sbin/vgextend", &[&vg, d]).await;
+        let _ = run(PrivOp::Pvcreate { device: d.clone() }).await;
+        let _ = run(PrivOp::Vgextend { vg: vg.clone(), device: d.clone() }).await;
     }
     Ok(json!({}))
 }
@@ -266,14 +263,14 @@ pub async fn remove_vg(params: Value) -> Result<Value, JsonRpcError> {
     let vg = params.get("vgUUID").or_else(|| params.get("vgName"))
         .and_then(Value::as_str).unwrap_or("").to_string();
     if vg.is_empty() { return Err(JsonRpcError::invalid_params("vg required")); }
-    let _ = sudo("/usr/sbin/vgremove", &["-f", "-y", &vg]).await;
+    let _ = run(PrivOp::Vgremove { vg }).await;
     Ok(json!({}))
 }
 
 /// Multipath inventory. Parses `multipath -ll -j` (JSON, available on
 /// multipath-tools ≥ 0.8). If multipath isn't installed, returns empty.
 pub async fn get_path_list_status(_params: Value) -> Result<Value, JsonRpcError> {
-    let Some(raw) = sudo("/usr/sbin/multipath", &["-ll", "-j"]).await else {
+    let Some(raw) = run(PrivOp::MultipathList).await else {
         return Ok(json!([]));
     };
     let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(json!({}));
@@ -307,17 +304,9 @@ pub async fn get_path_list_status(_params: Value) -> Result<Value, JsonRpcError>
     Ok(json!(out))
 }
 
-/// `Host.fcScan` — rescan FC fabric. echo "- - -" into each host's scan
-/// node. This is a privileged operation; the sysfs write needs root, so
-/// we use a small helper to do it via sudo if the daemon isn't root.
+/// `Host.fcScan` — rescan FC fabric. The sysfs `scan` nodes are
+/// root-writable only, so the whole iteration runs inside supervdsmd.
 pub async fn fc_scan(_params: Value) -> Result<Value, JsonRpcError> {
-    if let Ok(mut dir) = tokio::fs::read_dir("/sys/class/scsi_host").await {
-        while let Ok(Some(e)) = dir.next_entry().await {
-            let path = e.path().join("scan");
-            if tokio::fs::write(&path, "- - -").await.is_ok() { continue; }
-            // Fallback via tee under sudo.
-            let _ = sudo("/usr/bin/tee", &[path.display().to_string().as_str()]).await;
-        }
-    }
+    let _ = run(PrivOp::FcScan).await;
     Ok(json!({}))
 }

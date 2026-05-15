@@ -13,7 +13,7 @@ Name:           vdsm-rs
 # build during the COPR rollout, regardless of dnf's cache state.
 Epoch:          2
 Version:        4.5.7
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Rust rewrite of oVirt's VDSM host daemon
 
 License:        GPL-2.0-or-later
@@ -21,7 +21,6 @@ URL:            https://ovirt.org
 # Tarball top-level directory is `vdsm-rs/` to match the unpack rule below.
 Source0:        %{name}.tar
 Source1:        %{name}.sysusers
-Source2:        %{name}.sudoers
 Source3:        %{name}.tmpfiles
 
 # Pull the selinux subpackage onto every install by default. Users on
@@ -52,6 +51,9 @@ BuildRequires:  pkgconfig(libnl-route-3.0)
 Requires:       libvirt-daemon
 Requires:       libvirt-daemon-driver-qemu
 Requires:       qemu-kvm
+# supervdsmd is the only root component; vdsmd cannot mount storage or
+# drive LVM/iSCSI without it. Pull the subpackage on every install.
+Requires:       supervdsm = %{epoch}:%{version}-%{release}
 # ovirt-host-deploy unconditionally runs `tuned-adm profile virtual-host`,
 # which requires the tuned daemon to be installed and the dbus interface
 # reachable. We don't tune anything ourselves, but tuned has to be there
@@ -125,9 +127,11 @@ Requires:       vdsm = %{epoch}:%{version}-%{release}
 
 %description
 vdsm-rs is a Rust rewrite of the oVirt VDSM host-side daemon, targeting
-modern Fedora and EL distributions. v0 is intentionally limited:
-file-based (NFS) storage domains only; no Gluster, hosted-engine, OVS, or
-LVM/SAN. Wire-compatible with current ovirt-engine.
+modern Fedora and EL distributions. Supports NFS / POSIX / CIFS file
+storage domains and iSCSI / FC / LVM block storage domains, VM lifecycle
+via libvirt, VNC console, and live migration. No Gluster, hosted-engine,
+or OVS/OVN. Privileged operations run through supervdsmd; there is no
+sudoers dependency. Wire-compatible with current ovirt-engine.
 
 %package -n supervdsm
 Summary:        Privileged helper for vdsm-rs
@@ -198,9 +202,6 @@ install -D -m 0640 config/vdsm.toml.example \
     %{buildroot}%{_sysconfdir}/vdsm/vdsm.toml
 install -D -m 0644 %{SOURCE1} \
     %{buildroot}%{_sysusersdir}/%{name}.conf
-# Sudoers fragment: vdsm needs root for a small set of storage commands.
-install -D -m 0440 %{SOURCE2} \
-    %{buildroot}%{_sysconfdir}/sudoers.d/vdsm-rs
 # tmpfiles.d fragment: creates /rhev/data-center/mnt at boot so the NFS
 # mount path exists before vdsmd's ProtectSystem=strict takes effect.
 install -D -m 0644 %{SOURCE3} \
@@ -302,7 +303,6 @@ fi
 %{_unitdir}/vdsmd.service
 %{_sysusersdir}/%{name}.conf
 %config(noreplace) %{_sysconfdir}/sddm.conf.d/00-vdsm-rs.conf
-%attr(0440, root, root) %config(noreplace) %{_sysconfdir}/sudoers.d/vdsm-rs
 %{_tmpfilesdir}/vdsm-rs.conf
 # /etc/vdsm + vdsm.toml owned root:vdsm so the daemon (running as user
 # `vdsm`) can read its own config. We deliberately keep root as the
@@ -336,6 +336,21 @@ fi
 %{_datadir}/selinux/devel/include/distributed/%{selinux_modname}.if
 
 %changelog
+* Fri May 15 2026 John Boero <boeroboy@gmail.com> - 2:4.5.7-2
+- Replace the sudoers privilege path with supervdsmd. Every privileged
+  storage op (mount/umount, iscsiadm, pv/vg/lvcreate, lvchange,
+  lvremove, FC rescan, multipath) now runs in the root supervdsmd
+  daemon, reached over a Unix socket with a closed, typed protocol
+  (vdsm_common::supervdsm::PrivOp). supervdsmd builds each command from
+  validated fields, so the unprivileged daemon can only request the
+  operations we modelled — unlike `NOPASSWD: /usr/bin/mount`, which is
+  root-equivalent.
+- Socket is root:vdsm 0660 plus an SO_PEERCRED uid check.
+- Drop /etc/sudoers.d/vdsm-rs entirely; remove the sudoers Source.
+- vdsmd.service: NoNewPrivileges=true (the daemon no longer escalates),
+  Requires=supervdsmd.service.
+- Main package now Requires the supervdsm subpackage.
+
 * Thu May 14 2026 John Boero <boeroboy@gmail.com> - 2:4.5.7-1
 - Storage v1: full NFS SD attach + activate, Data Center initialises,
   SPM elects on this host.

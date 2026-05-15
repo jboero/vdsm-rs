@@ -66,12 +66,20 @@ the original test target was a SolidRun HoneyComb LX2K.
   `lvchange -ay`/`-an` and return `/dev/<vg>/<vol>` to libvirt. `vgs`-derived
   `disktotal/diskfree` for block SDs. iSCSI discover/login/logout/rescan,
   `lsblk -J -o TRAN` for FC vs iSCSI distinction, `multipath -ll -j` for
-  multipath inventory, sysfs FC rescan via `fcScan`. The privileged commands
-  (iscsiadm, pv/vg/lvcreate, lvchange, etc.) ship in
-  [`packaging/vdsm-rs.sudoers`][2] — installed to `/etc/sudoers.d/vdsm-rs`.
+  multipath inventory, sysfs FC rescan via `fcScan`.
+- **supervdsmd privilege boundary** — every privileged operation (mount,
+  umount, iscsiadm, pv/vg/lvcreate, lvchange, lvremove, FC rescan,
+  multipath) runs in a small root daemon, [`supervdsmd`][2], reached over
+  a Unix socket. The protocol is a *closed, typed* set of ops
+  ([`vdsm_common::supervdsm::PrivOp`][3]) — supervdsmd builds each command
+  itself from validated fields, so the unprivileged daemon can only
+  request operations we modelled. The socket is `root:vdsm 0660` and
+  supervdsmd additionally checks `SO_PEERCRED`. There is **no sudoers
+  file**; `vdsmd` runs with `NoNewPrivileges=true`.
 
   [1]: crates/vdsm-storage/src/sd_backend.rs
-  [2]: packaging/vdsm-rs.sudoers
+  [2]: crates/supervdsm/src/main.rs
+  [3]: crates/vdsm-common/src/supervdsm.rs
 - External VM ingestion — engine auto-discovers libvirt VMs running on the
   host and imports them as `external-*` managed entities.
 - **SELinux enforcing** clean: zero AVCs in steady state, custom policy

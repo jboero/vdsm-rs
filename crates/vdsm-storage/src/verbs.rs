@@ -1,12 +1,10 @@
 //! Storage-namespace verb handlers. Phase 1: just enough to satisfy the
 //! engine's "Add NFS Storage Domain" flow's first probes.
 
-use std::process::Stdio;
-
 use serde_json::{json, Value};
-use tokio::process::Command;
 use tracing::{info, warn};
 
+use vdsm_common::supervdsm::{self, PrivOp};
 use vdsm_rpc::JsonRpcError;
 
 use crate::connection::{connections, StorageServerConnection};
@@ -94,42 +92,27 @@ async fn mount_one(spec: &StorageServerConnection, domain_type: i64) -> i32 {
         }
     };
     // mount(2) requires UID 0 — mount.nfs strictly checks getuid()==0,
-    // capabilities aren't enough. Use sudo via the NOPASSWD rule in
-    // /etc/sudoers.d/vdsm-rs. Long-term: replace with a supervdsmd
-    // RPC so we don't depend on sudoers.
-    let mut args: Vec<String> = vec![
-        "-n".into(), "/usr/bin/mount".into(),
-        "-t".into(), vfs.into(),
-    ];
-    if !spec.mnt_options.is_empty() {
-        args.push("-o".into());
-        args.push(spec.mnt_options.clone());
-    }
-    args.push(spec.connection.clone());
-    args.push(mp.display().to_string());
-
-    let out = Command::new("/usr/bin/sudo")
-        .args(&args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await;
-
-    match out {
-        Ok(o) if o.status.success() => {
+    // capabilities aren't enough. supervdsmd runs the mount as root; the
+    // unprivileged daemon only names the fstype/spec/target.
+    match supervdsm::call(&PrivOp::Mount {
+        fstype: vfs.to_string(),
+        spec: spec.connection.clone(),
+        target: mp.display().to_string(),
+        options: spec.mnt_options.clone(),
+    }).await {
+        Ok(r) if r.ok => {
             info!(connection = %spec.connection, mountpoint = %mp.display(), "mounted");
             0
         }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
+        Ok(r) => {
             warn!(
-                connection = %spec.connection, stderr = %stderr,
+                connection = %spec.connection, stderr = %r.stderr.trim(),
                 "mount failed"
             );
-            100 // generic mount-failed engine errno; will refine as we hit specific cases
+            100 // generic mount-failed engine errno; refine per-case later
         }
         Err(e) => {
-            warn!(error = %e, "mount spawn failed");
+            warn!(error = %e, "supervdsm mount transport error");
             13
         }
     }
@@ -145,27 +128,30 @@ async fn iscsi_login_one(spec: &StorageServerConnection) -> i32 {
         return 22; // EINVAL
     }
     info!(connection = %spec.connection, "iSCSI login");
-    // The connection string is typically "portal:port,iqn" or engine
-    // sends iqn separately via the StorageServerConnection.iqn field.
-    // For the PoC we fall back to running discovery on the portal then
-    // logging in to any IQN found. If iscsiadm is missing the call
-    // returns failure but doesn't crash vdsm.
+    // The connection string is the portal. Discover targets on it, then
+    // log in to each discovered IQN. Both steps run as root inside
+    // supervdsmd. Discovery output lines: "<portal>,<tpgt> <iqn>".
     let portal = spec.connection.clone();
-    let disc = Command::new("/usr/sbin/iscsiadm")
-        .args(["-m", "discovery", "-t", "st", "-p", &portal])
-        .output().await;
-    if let Ok(o) = disc {
-        if !o.status.success() { return 101; }
-    } else {
+    let Some(raw) = supervdsm::run(PrivOp::IscsiDiscover { portal: portal.clone() }).await
+    else {
+        return 101;
+    };
+    let iqns: Vec<String> = raw
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1).map(str::to_string))
+        .collect();
+    if iqns.is_empty() {
         return 101;
     }
-    let login = Command::new("/usr/sbin/iscsiadm")
-        .args(["-m", "node", "-p", &portal, "--login"])
-        .output().await;
-    match login {
-        Ok(o) if o.status.success() => 0,
-        _ => 101,
+    let mut ok = false;
+    for iqn in iqns {
+        if supervdsm::run(PrivOp::IscsiLogin {
+            iqn, portal: portal.clone(),
+        }).await.is_some() {
+            ok = true;
+        }
     }
+    if ok { 0 } else { 101 }
 }
 
 async fn is_mounted(mp: &std::path::Path) -> bool {
@@ -188,12 +174,10 @@ pub async fn disconnect_storage_server(params: Value) -> Result<Value, JsonRpcEr
     for spec in con_list {
         let mp = spec.mountpoint();
         let status = if is_mounted(&mp).await {
-            let out = Command::new("/usr/bin/sudo")
-                .args(["-n", "/usr/bin/umount", mp.display().to_string().as_str()])
-                .output()
-                .await;
-            match out {
-                Ok(o) if o.status.success() => 0,
+            match supervdsm::call(&PrivOp::Umount {
+                target: mp.display().to_string(),
+            }).await {
+                Ok(r) if r.ok => 0,
                 _ => 16,
             }
         } else {
